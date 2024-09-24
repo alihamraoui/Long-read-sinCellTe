@@ -1,0 +1,340 @@
+---
+title: "Long-read_analysis"
+author: "Morgane Fierville & Ali Hamraoui"
+date: "2024-09-06"
+output:
+  html_document:
+    code_folding: show
+    code_download: true
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<!-- Set default parameters for all chunks -->
+```{r, setup, include = FALSE}
+set.seed(1337L)
+knitr::opts_chunk$set(echo = TRUE,
+
+                      message = FALSE,
+                      warning = FALSE,
+                      fold_output = FALSE, 
+                      fold_plot = FALSE,
+                      
+                      fig.align = 'center',
+                      fig.width = 20,
+                      fig.height = 15)
+```
+
+```{r}
+library(Seurat)
+library(dplyr)
+options(Seurat.object.assay.version = "v4")
+```
+
+```{r}
+cell_markers <-  list(Cajal_Retzius = c('Lhx5', 'Reln', 'Snhg11', 'Meg3'),
+                      GABAergic = c('Arx', 'Maf', 'Dlx2'),
+                      imature_GABAergic = c('Gad2', 'Meis2', 'Gad2', 'Dlx6os1'),
+                      Glutamatergic = c('Grin2b', 'Opcml', 'Camk2b', 'Mef2c'),
+                      imature_Glutamatergic = c('Sox11', 'Pou3f3', 'Pou3f2',  'Neurod6', 'Neurod2'),
+                      intermediate_progenitors = c('Snhg11', 'Neurog2', 'Eomes', 'Neurod1', 'Rbfox3', 'Tcf4', 'Meis2', 'H3f3b', 'Neurod6', 'Neurod2', 'Sox11', 'Pax6'),
+                      cyclin_radial_glia = c('Top2a', 'Ccnd2', 'Cenpf', 'Mki67'),
+                      radial_glia = c('Fabp7', 'Vim', 'Dbi' , 'Pax6'))
+```
+
+```{r}
+source('../../script_audrey/cell_annot_custom.R')
+
+rename_iso <- function(x){
+        x$iso_id <-apply(x[, c("geneId","transcriptId")], 1 , paste , collapse = ".." )
+        rownames(x) <- x$iso_id
+        x <- x[, !colnames(x)%in%c("geneId","transcriptId","iso_id")]
+        }
+
+annotate <- function (ScObject, cell_markers) {
+        if ("cell_type" %in% colnames(ScObject@meta.data)) {
+          ScObject$cell_type = NULL
+        }
+        ScObject = cell_annot_custom(ScObject,
+                                     assay = "RNA",         
+                                     newname = "cell_type",  
+                                     markers = cell_markers) 
+        summary(ScObject$cell_type)
+        return(ScObject)
+}
+```
+
+
+```{r}
+data_dir <- "./data/"
+out_dir <- "./output/"
+```
+
+In this section, we load the count matrices.
+
+### Genes
+
+We load the genes count matrix :
+
+load("data/illumina_data.Rdata")
+gene.mtx = Illumina$scNaUmi_seq
+
+```{r load_genes_cm}
+c190_gene <- Read10X(data.dir = paste0(data_dir, "GSM3748086_190c/"))
+c951_gene <- Read10X(data.dir = paste0(data_dir, "GSM3748088_951c/"))
+```
+
+### Isoforms
+
+```{r}
+c190_iso <- read.csv(paste0(data_dir,'GSM3748087_190c.isoforms.matrix.txt'), sep = '\t')
+c951_iso <- read.csv(paste0(data_dir,'GSM3748089_951c.isoforms.matrix.txt'), sep = '\t')
+
+c190_iso <- rename_iso(c190_iso)
+c951_iso <- rename_iso(c951_iso)
+```
+
+### Homogeneization
+
+We homogenize both 190c matrix annotations :
+```{r homogenize}
+colnames(c190_gene) = gsub("-1$", "", colnames(c190_gene))
+com.cells = intersect(colnames(c190_iso), colnames(c190_gene))
+
+c190_gene = c190_gene[, colnames(c190_gene)%in%com.cells]
+c190_iso = c190_iso[, colnames(c190_iso)%in%com.cells]
+```
+
+Homogenize both 951c matrix annotations?
+```{r homogenize 951c}
+colnames(c951_gene) = gsub("-1$", "", colnames(c951_gene))
+com.cells = intersect(colnames(c951_iso), colnames(c951_gene))
+
+c951_gene = c951_gene[, colnames(c951_gene)%in%com.cells]
+c951_iso = c951_iso[, colnames(c951_iso)%in%com.cells]
+```
+
+## Make Seurat object
+
+We create assays for each matrix :
+
+```{r create_assays}
+c190_gene_assay = CreateAssayObject(counts = c190_gene)
+c190_isoform_assay = CreateAssayObject(counts = c190_iso)
+```
+
+```{r create_assays 951c}
+c951_gene_assay = CreateAssayObject(counts = c951_gene)
+c951_isoform_assay = CreateAssayObject(counts = c951_iso)
+```
+
+and initialize a Seurat object :
+
+```{r init_sobj}
+assay = "RNA"
+sample_name = "190c"
+c190_Sobj = Seurat::CreateSeuratObject(counts = c190_gene_assay,
+                                        assay = assay,
+                                        project = sample_name)
+
+c190_Sobj[["ISO"]] = c190_isoform_assay
+c190_Sobj[[paste0('log_nCount_', assay)]] = log(c190_Sobj[[paste0('nCount_', assay)]])
+
+c190_Sobj
+head(rownames(c190_Sobj@assays$RNA$counts))
+head(rownames(c190_Sobj@assays$ISO$counts))
+```
+
+```{r init_sobj_951c}
+assay = "RNA"
+sample_name = "951c"
+c951_Sobj = Seurat::CreateSeuratObject(counts = c951_gene_assay,
+                                        assay = assay,
+                                        project = sample_name)
+
+c951_Sobj[["ISO"]] = c951_isoform_assay
+c951_Sobj[[paste0('log_nCount_', assay)]] = log(c951_Sobj[[paste0('nCount_', assay)]])
+
+c951_Sobj
+head(rownames(c951_Sobj@assays$RNA$counts))
+head(rownames(c951_Sobj@assays$ISO$counts))
+```
+
+#########
+## Integration of the two objects
+#################################
+
+```{r}
+# put dataset into a list of two seurat objects (190c and 951c)
+Sobj.list <- list(c951_Sobj, c190_Sobj)
+
+# normalize and identify variable features for each dataset independently
+Sobj.list <- lapply(X = Sobj.list, FUN = function(x) {
+    x = Seurat::NormalizeData(x,
+                             normalization.method = "LogNormalize")
+
+    x = Seurat::FindVariableFeatures(x,
+                                    normalization.method = "vst",
+                                    nfeatures = 2000)
+})
+
+# select features that are repeatedly variable across datasets for integration
+features <- SelectIntegrationFeatures(object.list = Sobj.list)
+```
+
+```{r}
+anchors <- FindIntegrationAnchors(object.list = Sobj.list, anchor.features = features)
+seurat_obj <- IntegrateData(anchorset = anchors, new.assay.name = "integrated")
+seurat_obj
+```
+
+We generate a projection based on the genes count matrix, before cells filtering.
+
+```{r set_assay_before}
+Seurat::DefaultAssay(seurat_obj) = "integrated"
+```
+
+## Projection
+
+We generate a UMAP to visualize cells before filtering. First, we perform a PCA :
+
+```{r pca_before, fig.width = 12, fig.height = 4}
+seurat_obj = Seurat::ScaleData(seurat_obj,
+                               features = rownames(seurat_obj), verbose = F)
+var_features = Seurat::VariableFeatures(object = seurat_obj)
+
+seurat_obj = Seurat::RunPCA(seurat_obj, features = var_features,
+                    verbose = F, reduction.name = "RNA_pca", max_dims = 50)
+
+Seurat::ElbowPlot(seurat_obj, ndims=100, reduction = "RNA_pca")
+```
+
+We generate a UMAP and tSNE with 10 principal components :
+
+```{r umap_before}
+ndims = 10
+seurat_obj = Seurat::RunUMAP(seurat_obj,
+                             reduction = "RNA_pca",
+                             dims = 1:ndims,
+                             seed.use = 1337L,
+                             reduction.name = paste0("RNA_pca_", ndims, "_umap"))
+
+seurat_obj = Seurat::RunTSNE(seurat_obj,
+                             reduction = "RNA_pca",
+                             dims = 1:ndims,
+                             seed.use = 1337L,
+                             reduction.name = paste0("RNA_pca_", ndims, "_tsne"))
+
+seurat_obj
+```
+
+```{r fig.height=5, fig.width=8}
+reduction = paste0("RNA_pca_", ndims, "_tsne")
+DimPlot(seurat_obj, reduction = reduction)
+```
+
+## Clustering
+
+We generate a clustering :
+```{r}
+seurat_obj <- FindNeighbors(seurat_obj, dims = 1:ndims, verbose = F, reduction = 'RNA_pca')
+seurat_obj <- FindClusters(seurat_obj, resolution = 0.6, verbose = F)
+```
+
+We visualize the clustering :
+```{r fig.height=5, fig.width=8}
+DimPlot(seurat_obj, reduction = reduction)
+```
+
+## Cell type annotation
+
+We annotate cells for cell type using `Seurat::AddModuleScore` function.
+
+```{r fig.height=5, fig.width=8}
+seurat_obj <- annotate(seurat_obj, cell_markers)
+DimPlot(seurat_obj, reduction = reduction, group.by = 'cell_type')
+```
+
+We annotate clusters :
+```{r}
+cell_data <- data.frame(
+  cluster = Idents(seurat_obj),
+  cell_type = seurat_obj$cell_type
+)
+
+major_cell_type_per_cluster <- cell_data %>%
+  group_by(cluster) %>%
+  summarise(cluster_cell_type = names(which.max(table(cell_type))))
+
+seurat_obj$cluster_cell_type <- major_cell_type_per_cluster$cluster_cell_type[match(Idents(seurat_obj), major_cell_type_per_cluster$cluster)]
+```
+
+We visualize cluster annotation on the projection :
+
+```{r fig.height=5, fig.width=8}
+DimPlot(seurat_obj, reduction = "RNA_pca_10_tsne", group.by = 'cluster_cell_type', label = T)
+```
+
+## Isoforms 
+
+Here, we are looking for events where two isoforms of the same gene are considered markers of different clusters.
+
+We process the isoforms count matrix :
+
+```{r process_iso}
+seurat_obj = Seurat::NormalizeData(seurat_obj, assay = "ISO",
+                                   normalization.method = "LogNormalize", verbose = F) 
+seurat_obj = Seurat::ScaleData(seurat_obj, assay = "ISO", verbose = FALSE)
+```
+
+We generate a "multi" assay using `isoswitch` package :
+
+```{r isoswitch_multi}
+seurat_obj = isoswitch::iso_preprocess(seurat_obj, assay = "ISO", new_assay = "multi", filter_threshold = 5)
+head(rownames(seurat_obj@assays$multi@counts))
+```
+
+We finally have three assays with distinct dimensions :
+
+```{r dim_assays}
+dim(seurat_obj@assays$RNA@counts)
+dim(seurat_obj@assays$ISO@counts)
+dim(seurat_obj@assays$multi@counts)
+```
+
+we search for gene markers. then returns genes with >1 transcripts in different clusters. (ISO_SWITCH_ALL() method uses Seurat’s FindMarkers)
+
+```{r iso_compute_stats}
+#seurat_obj@active.ident <- seurat_obj@meta.data$cluster_cell_type
+Idents(seurat_obj) <- 'cluster_cell_type'
+stats = isoswitch::iso_compute_stats(seurat_obj@assays$multi@counts) %>%
+  dplyr::arrange(gene_id)
+
+head(stats, n=4)
+```
+
+We plot a summary with number of genes, number of transcripts, distribution of isoforms and number of genes per cluster.
+
+```{r plot_assay_stats, fig.height=6, fig.width=12}
+isoswitch::plot_assay_stats(seurat_obj, "ISO")
+```
+
+## Save
+
+We save the annotated and filtered Seurat object :
+
+```{r save_seurat_obj_filtered_annotated}
+saveRDS(seurat_obj, file = paste0(out_dir, "/datasets/", "seurat_obj_annotated.rds"))
+```
+
+## R session
+
+```{r sessioninfo, echo = FALSE, fold_output = TRUE}
+sessionInfo()
+```

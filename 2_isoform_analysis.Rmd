@@ -1,0 +1,120 @@
+---
+title: "Long-read_analysis"
+author: "Morgane Fierville & Ali Hamraoui"
+date: "2024-09-06"
+output:
+  html_document:
+    code_folding: show
+    code_download: true
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<!-- Set default parameters for all chunks -->
+```{r, setup, include = FALSE}
+set.seed(1337L)
+knitr::opts_chunk$set(echo = TRUE,
+
+                      message = FALSE,
+                      warning = FALSE,
+                      fold_output = FALSE, 
+                      fold_plot = FALSE,
+                      
+                      fig.align = 'center',
+                      fig.width = 20,
+                      fig.height = 15)
+```
+
+This file is used to identify differentially expressed isoforms.
+
+```{r library}
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+
+.libPaths()
+```
+
+# Preparation
+
+In this section, we set the global settings of the analysis. We will store data there :
+
+```{r out_dir}
+out_dir = "./output/"
+```
+
+We load the Seurat object :
+
+```{r load_sobj}
+seurat_obj = readRDS(paste0(out_dir, "/datasets/seurat_obj_annotated.rds"))
+```
+
+This is the projection of interest :
+
+```{r name2D}
+name2D =  "RNA_pca_10_tsne"
+```
+
+# Dataset
+
+We visualize cells :
+
+```{r see_cells, fig.height=5, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
+cell_type = Seurat::DimPlot(seurat_obj, reduction = name2D, group.by = "cluster_cell_type") +
+  Seurat::NoAxes() + #Seurat::NoLegend() +
+  ggplot2::theme(aspect.ratio = 1,
+                 plot.title = element_text(hjust = 0.5),
+                 plot.subtitle = element_text(hjust = 0.5))
+
+clusters = Seurat::DimPlot(seurat_obj, group.by = "seurat_clusters", label = TRUE,
+                           reduction = name2D) +
+  Seurat::NoAxes() + ggplot2::ggtitle("Clustering") +
+  ggplot2::theme(aspect.ratio = 1,
+                 plot.title = element_text(hjust = 0.5))
+
+clusters | cell_type
+```
+
+# Isoforms DE
+
+In this section, we use `isoswitch` package to perform differential expression for isoforms.
+
+## Between pair of clusters
+
+We perform differential expression for isoforms, between each pair of clusters :
+
+```{r ide}
+clusters = levels(seurat_obj@active.ident)
+switch_markers = isoswitch::ISO_SWITCH_ALL(seurat_obj, clusters, assay = "ISO", 
+                                           min.pct = 0, logfc.threshold = 0.40)
+
+head(switch_markers)
+```
+
+We visualize the number of DE isoforms between each cluster :
+
+```{r plot_marker_matrix, fig.height=6, fig.width=12}
+pl1 = isoswitch::plot_marker_matrix(seurat_obj, switch_markers) 
+#switch_markers2 = switch_markers[!is.infinite(switch_markers$avg_log2FC),]
+pl2 = isoswitch::plot_marker_score(seurat_obj, switch_markers)
+pl1 | pl2
+```
+## Save
+
+We save the list of DE isoforms :
+
+```{r save_sobj}
+saveRDS(switch_markers, file = paste0(out_dir, "./datasets/", "switch_markers_combined_all.rds"))
+```
+
+## R Session
+
+```{r sessioninfo, echo = FALSE, fold_output = TRUE}
+sessionInfo()
+```
