@@ -1,5 +1,5 @@
 
-# sinCellTe 2024: scRNA-seq analysis with long reads
+# sinCellTe 2024: scRNA-seq long reads analysis 
 
 Welcome to the sinCellTe 2024 practical session on single-cell RNA sequencing (scRNA-seq) analysis with long reads. This course is split into two main parts, each contained in separate R Markdown files that guide you through the process of preprocessing scRNA-seq isoform datasets and performing differential isoform expression analysis.
 
