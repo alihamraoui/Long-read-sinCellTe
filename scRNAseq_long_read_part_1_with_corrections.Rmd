@@ -1,0 +1,651 @@
+---
+title: "scRNAseq long read analysis - Part 1"
+author: "Morgane Fierville & Ali Hamraoui, SincellTE 2024"
+date: "2024-10-24"
+output:
+  html_document:
+    code_folding: show
+    code_download: true
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<!-- Set default parameters for all chunks -->
+```{r, setup, include = FALSE}
+set.seed(1337L)
+knitr::opts_chunk$set(echo = TRUE,
+
+                      message = FALSE,
+                      warning = FALSE,
+                      fold_output = FALSE, 
+                      fold_plot = FALSE,
+                      
+                      fig.align = 'center',
+                      fig.width = 15,
+                      fig.height = 8)
+```
+
+```{r message=FALSE, include=FALSE}
+data_dir <- "/shared/projects/sincellte2024/workshop_long_read_analysis/data/"
+
+# Create directory if not exist
+checkDir <- function(output_dir){ 
+  if (! dir.exists(output_dir)){
+    dir.create(output_dir, recursive = TRUE)
+    cat(paste0(output_dir, " CREATED\n"))
+  }
+}
+```
+
+# Transcript isoform diversity in embryonic mouse brain.
+
+Droplet-based high throughput single cell sequencing techniques tremendously advanced our insight into cell-to-cell heterogeneity. However, those approaches only allow analysis of one extremity of the transcript after short read sequencing. In consequence, information on splicing and sequence heterogeneity is lost. To overcome this limitation, several approaches that use long-read sequencing were introduced recently. Yet, those techniques are limited by low sequencing depth and/or lacking or inaccurate assignment of unique molecular identifiers (UMIs), which are critical for elimination of PCR bias and artifacts. We introduce ScNaUmi-seq, an approach that combines the high throughput of Oxford Nanopore sequencing with an accurate cell barcode and UMI assignment strategy. UMI guided error correction allows to generate high accuracy full length sequence information with the 10x Genomics single cell isolation system at high sequencing depths. We analyzed transcript isoform diversity in embryonic mouse brain and show that ScNaUmi-seq allows defining splicing and SNVs (RNA editing) at a single cell level.
+
+Lebrigand, K., Magnone, V., Barbry, P. et al. High throughput error corrected Nanopore single cell transcriptome sequencing. 
+
+Nat Commun 11, 4025 (2020). https://doi.org/10.1038/s41467-020-17800-6
+
+
+## 1.1 Introduction
+
+The aim of these materials is to demonstrate how to use the `Seurat` and `Isoswitch` R packages to process long read scRNA-seq data. Here we use the Lebrigand et al. datasets and follow the same general steps used in the scRNA-seq course, but using `Isoswitch` package to perform DE isoforms. In this first part we will show how to preprocess scRNA-seq isoform datasets and create a multi Assay Seurat object. Then, in a second part, we'll use this Seurat object to perform differential isoform expression analysis and explore pertinent biological questions.
+
+## 1.2 Dataset
+Some context for this dataset is given in the Lebrigand et al. introduction. This dataset includes two independent technical replicates: the 951-cell dataset and the 190-cell dataset. For each replicate, we have both a Gene and an Isoform expression matrix.
+
+## 1.3 Reading in the data
+
+We start the analysis by loading the necessary packages:
+
+```{r message=FALSE, include=FALSE}
+library(Seurat)
+library(dplyr)
+library(isoswitch)
+library(scCustomize)
+
+options(Seurat.object.assay.version = "v5")
+```
+
+```{r message=FALSE, include=FALSE}
+source('/shared/projects/sincellte2024/workshop_long_read_analysis/imports/cell_annot_custom.R')
+
+rename_iso <- function(matrix){
+        matrix$transcriptId <- sub("\\..*", "", matrix$transcriptId)
+        matrix$iso_id <-apply(matrix[, c("geneId","transcriptId")], 1 , paste , collapse = ".." )
+        rownames(matrix) <- matrix$iso_id
+        matrix <- matrix[, !colnames(matrix)%in%c("geneId","transcriptId","iso_id")]
+        }
+
+annotate <- function (ScObject, cell_markers) {
+  if ("cell_type" %in% colnames(ScObject@meta.data)) {
+    ScObject$cell_type = NULL
+  }
+  ScObject = cell_annot_custom(ScObject,
+                               assay = "RNA",          # which assay to use to perform annotation ?
+                               newname = "cell_type",  # new column name in meta.data
+                               markers = cell_markers) # markers for cell type
+  return(ScObject)
+}
+```
+
+We will load in two replicate from each data type (gene and isoform counts):
+
+### 1.3.1 Gene-level matrix count
+
+We then load the gene counts data, using a Seurat function that reads cellranger output, for 190c and 951c replicates:
+
+```{r load_genes_cm}
+c190_gene <- Seurat::Read10X(data.dir = paste0(data_dir, "GSM3748086_190c/"))
+c951_gene <- Seurat::Read10X(data.dir = paste0(data_dir, "GSM3748088_951c/"))
+```
+
+**Questions:**
+How many cells and genes do we have in this both datasets ? Are these genes all common between the two replicates ? 
+
+```{r}
+# Write your code here
+# ...
+
+dim(c190_gene) # 27998 x 190
+dim(c951_gene) # 27998 x 951
+all(rownames(c190_gene) == rownames(c951_gene)) # TRUE
+
+```
+
+**Answer:** 
+The genes are the same in both replicates.
+- c190_gene: 190 cells, 27998 genes 
+- c951_gene: 951 cells, 27998 genes
+
+
+### 1.3.2 Isoform-level matrix count
+
+We load and filter the Sicelore CSV file of isoform count matrix for 190c and 951c replicates:
+
+There are an important component of the Isoswitch to be aware of:  
+  - Isoswich expects the row names of the isoform count matrix to follow the format `[gene_name]..[transcript_id]`, 
+  example: `Eva1c..ENSMUST00000231280`.  
+  - We use the rename_iso function described on top to rename Isoform-level matrix rownames.   
+  
+```{r}
+c190_iso <- read.csv(paste0(data_dir,'GSM3748087_190c.isoforms.matrix.txt'), sep = '\t')
+c951_iso <- read.csv(paste0(data_dir,'GSM3748089_951c.isoforms.matrix.txt'), sep = '\t')
+
+```
+
+**Exercise: **
+Apply the function `rename_iso` for each replicates and try to explain it.
+
+```{r}
+# Write your code here
+# ...
+
+c190_iso <- rename_iso(c190_iso)
+c951_iso <- rename_iso(c951_iso)
+```
+
+**Answer: **  
+- The first line of the function will remove all the number after the "." in the column "transcriptId". For example, it replaces "ENSMUST00000156717.1" by "ENSMUST00000156717". The regex "\\..*" means to replace the dot and everything that follows it.  
+- The second line will just create a new column "iso_id" with the concatenation of the geneId and the transcriptId separated by ".." (corresponding to : "paste(c190_iso\$geneId, c190_iso\$transcriptId, sep= "..")").  
+- The third line will replace the rownames of the matrix by the new column "iso_id" 
+- Finally, the last line will keep only the columns with the cellular barcodes.  
+
+
+### 1.3.3 Homogeneization
+
+To homogenize both 190c matrices (genes + isoforms), we ensure to have the same barcodes in the columns of both matrices:
+
+```{r homogenize_190c}
+colnames(c190_gene) = gsub("-1$", "", colnames(c190_gene)) # remove the "-1" for each cellular barcodes
+com.cells = intersect(colnames(c190_iso), colnames(c190_gene))
+length(com.cells) # 190
+
+c190_gene = c190_gene[, colnames(c190_gene) %in% com.cells]
+c190_iso = c190_iso[, colnames(c190_iso) %in% com.cells]
+
+# dim(c190_gene)[2]
+# dim(c190_iso)[2]
+```
+
+**Exercise: **
+Do the same for 951c matrices:
+
+```{r homogenize_951c_a}
+# Write your code here
+# ...
+
+colnames(c951_gene) = gsub("-1$", "", colnames(c951_gene))
+com.cells = intersect(colnames(c951_iso), colnames(c951_gene))
+length(com.cells) # 951
+
+c951_gene = c951_gene[, colnames(c951_gene) %in% com.cells]
+c951_iso = c951_iso[, colnames(c951_iso) %in% com.cells]
+```
+
+## 1.4 The Seurat Object
+
+We can use `CreateAssay5Object` to make Seurat assay for each dataset. Then, we use the gene assay to create a Seurat Object that will be used in the analysis:
+
+### 1.4.1 Create Seurat assay:
+We create a gene and isoform assays for replicate 190c:
+
+```{r create_assays_190c}
+c190_gene_assay = CreateAssay5Object(counts = c190_gene)
+c190_isoform_assay = CreateAssay5Object(counts = c190_iso)
+```
+
+**Exercise: **
+Create the assay objects for the replicate 951c:
+
+```{r create_assays_951c_a}
+# Write your code here
+# ...
+
+c951_gene_assay = CreateAssay5Object(counts = c951_gene)
+c951_isoform_assay = CreateAssay5Object(counts = c951_iso)
+```
+
+### 1.4.2 Create Seurat object
+
+Now, we initialize a Seurat object with gene assay. Then, we add the isoform assay to the same Seurat object. We will name our Seurat objects **c190_Sobj** and **c951_Sobj**
+
+```{r init_sobj}
+assay = "RNA"
+sample_name = "190c"
+c190_Sobj = Seurat::CreateSeuratObject(counts = c190_gene_assay,
+                                        assay = assay,
+                                        project = sample_name)
+
+c190_Sobj[["ISO"]] = c190_isoform_assay
+c190_Sobj[[paste0('log_nCount_', assay)]] = log(c190_Sobj[[paste0('nCount_', assay)]])
+
+c190_Sobj
+head(rownames(c190_Sobj@assays$RNA$counts))
+head(rownames(c190_Sobj@assays$ISO$counts))
+head(c190_Sobj@meta.data)
+
+```
+
+**Exercise: **
+Create a Seurat object 'c951_Sobj' for replicate 951c:
+
+```{r init_sobj_951c_a}
+# Write your code here
+# ...
+
+assay = "RNA"
+sample_name = "951c"
+c951_Sobj = Seurat::CreateSeuratObject(counts = c951_gene_assay,
+                                        assay = assay,
+                                        project = sample_name)
+
+c951_Sobj[["ISO"]] = c951_isoform_assay
+c951_Sobj[[paste0('log_nCount_', assay)]] = log(c951_Sobj[[paste0('nCount_', assay)]])
+
+c951_Sobj
+head(rownames(c951_Sobj@assays$RNA$counts))
+head(rownames(c951_Sobj@assays$ISO$counts))
+head(c951_Sobj@meta.data)
+
+```
+
+**Questions:**
+How many cells and features are there within each sample ?
+
+```{r}
+# Write your code here
+# ...
+
+c190_Sobj
+c190_Sobj@assays$RNA
+c190_Sobj@assays$ISO
+
+c951_Sobj
+c951_Sobj@assays$RNA
+c951_Sobj@assays$ISO
+```
+
+**Answer:**  
+- c190_Sobj: 190 cells, 48832 features (27998 genes and 20834 isoforms)  
+- c951_Sobj: 951 cells, 58722 features (27998 genes and 30724 isoforms)  
+
+
+## 1.5 Merge, normalise and dimension reduction
+
+### 1.5.1 Merge
+
+Now, we merge our datasets (with batch correction) and see whether there still a batch effect using UMAP:
+
+We use the `Seurat::merge` function to merge the c190_Sobj and c951_Sobj objects. We will name the merged Seurat objects **seurat_obj**
+
+```{r}
+seurat_obj <- merge(c951_Sobj, c190_Sobj, add.cell.ids = c("c951", "c190"))
+# seurat_obj <- merge(c951_Sobj, c190_Sobj) # Avis : Some cell names are duplicated across objects provided. Renaming to enforce unique cell names.
+
+seurat_obj
+```
+
+
+**Questions:**
+How many assays and layers you have within the object ? and what are they?
+
+**Answer:**  
+- 2 assays : RNA and ISO   
+- 2 layers for each assay : "counts.951c" and "counts.190c"  
+
+```{r}
+# head(seurat_obj@assays$RNA$counts.951c)
+# head(seurat_obj@assays$RNA$counts.190c)
+```
+
+
+### 1.5.2 Normalization
+
+Next, to generate a projection based on the genes count. We first normalize the genes count matrix using the `LogNormalize` method.
+
+**Warning:** Being aware of the active assay is important when doing different types of analysis because tools will try to use the active assay by default if they can.
+
+```{r set_assay_before}
+Seurat::DefaultAssay(seurat_obj) = "RNA"
+```
+
+```{r normalization}
+seurat_obj = Seurat::NormalizeData(seurat_obj,
+                                   normalization.method = "LogNormalize",
+                                   assay = "RNA")
+
+seurat_obj = Seurat::FindVariableFeatures(seurat_obj,
+                                          assay = "RNA",
+                                          normalization.method = "vst",
+                                          nfeatures = 3000)
+seurat_obj
+```
+
+### 1.5.3 Dimentianality reduction
+
+Let's generate a tSNE plot to visualize cells. 
+
+First, we perform a PCA:
+
+```{r pca_before}
+seurat_obj = Seurat::ScaleData(seurat_obj,
+                               features = rownames(seurat_obj), verbose = F)
+
+var_features = Seurat::VariableFeatures(object = seurat_obj)
+
+seurat_obj = Seurat::RunPCA(seurat_obj, features = var_features,
+                    verbose = F, reduction.name = "RNA_pca", max_dims = 100)
+```
+
+It’s often useful to know how many PCs can be used without losing a lot of information. So we need to pick a number of PCs which capture most of the variance in the data. These will be used to generate a UMAP plot. The elbow plot shows the part of the variance captured by each PC.
+
+**Questions:**
+How many PCs should we use to describe the data ?
+
+```{r elbowPlot, fig.width = 12, fig.height = 4}
+Seurat::ElbowPlot(seurat_obj, ndims=100, reduction = "RNA_pca")
+```
+
+**Answer:**
+A large proportion of the variation is captured by 10 components. In our case a big drop happens at 10, so seems like a good initial choice:
+
+Non-linear dimension reduction methods such as UMAP and TSNE take the PCA data as a starting point. We generate a tSNE with 10 principal components :
+
+```{r tsne_before}
+ndims = 10
+
+seurat_obj = Seurat::RunTSNE(seurat_obj,
+                             reduction = "RNA_pca",
+                             dims = 1:ndims,
+                             seed.use = 1337L,
+                             reduction.name = paste0("RNA_pca_", ndims, "_tsne"))
+
+seurat_obj
+```
+
+
+```{r replicates, fig.height=4, fig.width=8}
+DimPlot(seurat_obj, reduction = "RNA_pca_10_tsne") +
+  ggplot2::theme(aspect.ratio = 1)
+```
+
+**Questions:**
+Are the technical replicates overlap well ? Do you see any sample bias ?
+
+**Answer:**
+The technical replicates overlap well and we don't see any sample bias.
+
+
+### 1.5.4 Clustering
+
+Now, We can do clustering. Incease resolution parameter leads to more clusters (default is 0.8). It's very important to find the correct cluster resolution, since cell type markers depends on cluster definition.
+
+```{r}
+seurat_obj <- FindNeighbors(seurat_obj, dims = 1:ndims, verbose = F, reduction = 'RNA_pca')
+seurat_obj <- FindClusters(seurat_obj, resolution = 0.7, verbose = F)
+```
+
+```{r clusteres, fig.height=4, fig.width=8}
+DimPlot(seurat_obj, reduction = "RNA_pca_10_tsne") + 
+        ggplot2::theme(aspect.ratio = 1)
+```
+
+## 1.6 Identifying cell types
+
+Here, we will use a set of markers based on Lebriband et al. paper to annotate each cell. `Seurat::AddModuleScore` function allows to give a cell type score to each cell. Then, cell type class is assigned to a cell according to the highest score. Finally, we will use cell annotation to determine which cell type is in each cluster. 
+
+### 1.6.1 Cell markers:
+
+```{r markers}
+cell_markers <- list(Cajal_Retzius = c('Lhx5', 'Reln', 'Snhg11', 'Meg3'),
+                      GABAergic = c('Arx', 'Maf', 'Dlx2'),
+                      imature_GABAergic = c('Gad2', 'Meis2', 'Gad2', 'Dlx6os1'),
+                      Glutamatergic = c('Grin2b', 'Opcml', 'Camk2b', 'Mef2c'),
+                      imature_Glutamatergic = c('Sox11', 'Pou3f3', 'Pou3f2',  'Neurod6', 'Neurod2'),
+                      intermediate_progenitors = c('Snhg11', 'Neurog2', 'Eomes', 'Neurod1', 'Rbfox3', 'Tcf4', 'Meis2', 'H3f3b', 'Neurod6', 'Neurod2', 'Sox11', 'Pax6'),
+                      cyclin_radial_glia = c('Top2a', 'Ccnd2', 'Cenpf', 'Mki67'),
+                      radial_glia = c('Fabp7', 'Vim', 'Dbi' , 'Pax6'))
+
+color_markers <- list(Cajal_Retzius = "#EFE64C",
+                      GABAergic = "#E88578",
+                      imature_GABAergic = "#ABA73F",
+                      Glutamatergic = "#79C488", 
+                      imature_Glutamatergic = "#4A9EC0", 
+                      intermediate_progenitors = "#4978B4",
+                      cyclin_radial_glia = "#825B8D", 
+                      radial_glia = "#D04C3A")
+```
+
+```{r fig.height=1, fig.width=15}
+data.frame(cell_type = names(color_markers),
+           color = unlist(color_markers)) %>%
+  ggplot2::ggplot(., ggplot2::aes(x = cell_type, y = 0, fill = cell_type)) +
+  ggplot2::geom_point(pch = 21, size = 5) +
+  ggplot2::scale_fill_manual(values = unlist(color_markers), breaks = names(color_markers)) +
+  ggplot2::theme_classic() +
+  ggplot2::theme(legend.position = "none",
+                 axis.line = ggplot2::element_blank(),
+                 axis.title = ggplot2::element_blank(),
+                 axis.ticks = ggplot2::element_blank(),
+                 axis.text.x = ggplot2::element_text(size=12),
+                 axis.text.y = ggplot2::element_blank())
+```
+
+### 1.6.2 Annotate cells:
+
+```{r}
+seurat_obj <- JoinLayers(seurat_obj)
+# Create join matrix 
+# seurat_obj@assays$RNA@layers$data
+# seurat_obj@assays$RNA@layers$counts
+# seurat_obj@assays$RNA@layers$scale.data
+
+seurat_obj <- annotate(seurat_obj, cell_markers)
+table(seurat_obj$cell_type)
+```
+
+```{r cell_type, fig.height=4, fig.width=8}
+DimPlot(seurat_obj, reduction = "RNA_pca_10_tsne", group.by = 'cell_type')+
+        ggplot2::scale_color_manual(values = unlist(color_markers),
+                              breaks = names(color_markers)) +
+        Seurat::NoAxes() +
+        ggplot2::theme(aspect.ratio = 1)
+```
+
+### 1.6.3 Annotate clusters:
+
+We have our individual cell type, now let’s annotate clusters based on major cell type:
+
+```{r}
+cell_data <- data.frame(
+  cluster = Idents(seurat_obj),
+  cell_type = seurat_obj$cell_type
+)
+
+major_cell_type_per_cluster <- cell_data %>%
+  group_by(cluster) %>%
+  summarise(cluster_cell_type = names(which.max(table(cell_type))))
+
+seurat_obj$cluster_cell_type <- major_cell_type_per_cluster$cluster_cell_type[match(Idents(seurat_obj), major_cell_type_per_cluster$cluster)]
+table(seurat_obj$seurat_clusters, seurat_obj$cell_type)
+```
+
+```{r cluster_cell_type, fig.height=5, fig.width=8}
+DimPlot(seurat_obj, reduction = "RNA_pca_10_tsne", group.by = 'cluster_cell_type', label = F) +
+        ggplot2::scale_color_manual(values = unlist(color_markers),
+                              breaks = names(color_markers)) +
+        Seurat::NoAxes() +
+        ggplot2::theme(aspect.ratio = 1)
+```
+
+## 1.7 Differentially expressed isoforms
+
+Now that we have our annotated cell clusters, we can ask questions about differences between cell types we identified at the transcript level.
+Here, we will look for events where two isoforms of the same gene are considered markers of different clusters.
+
+### 1.7.1 Visualising gene and isoform counts
+
+We can use the `VlnPlot()` function to visualize data stored in our metadata slot. This function will generate violin plots with clusters on the x-axis and the variable of interest on the y-axis.
+
+For example, to plot raw counts per cell type:
+
+```{r ncount, fig.height=5, fig.width=10}
+VlnPlot(seurat_obj, features = c("nCount_RNA", "nCount_ISO"), group.by = 'cluster_cell_type', log=TRUE)
+```
+
+**Exercise:**
+Does the gene counts correlate well with the isoform count? To do this, you can use the `FeatureScatter()` function.
+
+```{r featurescatter, fig.height=5, fig.width=12}
+# Write your code here
+# ...
+
+FeatureScatter(seurat_obj, feature1 = "nCount_RNA", feature2 = "nCount_ISO", group.by = 'cluster_cell_type')  +
+        ggplot2::scale_color_manual(values = unlist(color_markers),
+                              breaks = names(color_markers)) +
+        ggplot2::theme(aspect.ratio = 1)
+```
+
+**Answer:**
+Yes, they have a correlation of 0.99.
+
+
+### 1.7.2 Convert Seurat assay to V4
+
+Now, to use `Isoswitch`, we have to make sure that we have a **Seurat V4 object**. If not, we have to convert a V5 object using `Convert_Assay` function from `scCustomize` package.
+We name the new object "seurat_obj4"
+
+```{r}
+seurat_obj4 <- scCustomize::Convert_Assay(seurat_object = seurat_obj, convert_to = "assay", assay = Assays(seurat_obj))
+seurat_obj4
+```
+
+### 1.7.3 Normalize isoform counts
+
+To work on the isoform level, We will use the **ISO assay**. We normalize and scale the isoform count matrix:
+
+```{r process_iso}
+seurat_obj4 = Seurat::NormalizeData(seurat_obj4, assay = "ISO",
+                                   normalization.method = "LogNormalize", verbose = F) 
+seurat_obj4 = Seurat::ScaleData(seurat_obj4, assay = "ISO", verbose = FALSE)
+seurat_obj4
+```
+
+### 1.7.3 Generate a "multi" assay
+
+We generate a "multi" assay using `isoswitch` package, the method `iso_preprocess()` prepares the isoform matrix by removing low-expression transcripts as well as removing single-isoform genes which are irrelevant for the isoform switch analysis. The threshold for filtering transcripts is 5, this means that we remove the transcript if it represents less than 5% of the gene counts.
+
+The resulting "multi-isoform" matrix is stored as a new assay on the input Seurat object.
+
+```{r isoswitch_multi}
+seurat_obj4 = isoswitch::iso_preprocess(seurat_obj4, assay = "ISO", new_assay = "multi", filter_threshold = 5)
+head(rownames(seurat_obj4@assays$multi@counts))
+```
+
+**Questions:**
+How many transcripts did we remove ? 
+
+**Answer:**
+We removed 17747 transcripts (31986 - 14239).
+
+
+We finally have three assays with distinct dimensions:
+
+```{r dim_assays}
+dim(seurat_obj4@assays$RNA@counts)
+dim(seurat_obj4@assays$ISO@counts)
+dim(seurat_obj4@assays$multi@counts)
+```
+
+### 1.7.3 isoform characterization
+
+The method `iso_compute_stats()` parses the isoform raw count matrix returning a data frame with stats on the expression of each transcript
+
+- `feature`, `gene_id`, `transcript_id` gene/transcript identifiers
+- `sum` Total UMI counts for the transcript
+- `total_gene` Total UMI counts for the gene
+- `n_isofs` Number of distinct isoforms detected for the gene
+- `max_sum` Max sum value for the isoform with the highest expression
+- `perc` Relative percentage of isoform UMI count vs gene total.
+- `is_major` (Boolean) is this considered a major isoform
+- `is_top` (Boolean) is this highest expressed isoform
+
+```{r iso_compute_stats}
+Idents(seurat_obj4) <- 'cluster_cell_type'
+stats = isoswitch::iso_compute_stats(seurat_obj4@assays$multi@counts) %>%
+  dplyr::arrange(gene_id)
+
+head(stats, n=4)
+```
+
+**Exercise:**
+Which gene have the highest number of isoforms ? Find the gene name and the number of isoforms.
+
+```{r}
+# Write your code here
+# ...
+
+stats[stats$n_isofs == max(stats$n_isofs),]
+```
+
+**Answer:**
+The gene is "Kcnq2" and it has 10 isoforms.
+
+
+**Exercise:**
+Which isoform have the highest number of counts ? Find this isoform, its corresponding gene name and its number of counts.
+
+
+```{r}
+# Write your code here
+# ...
+
+stats[stats$sum == max(stats$sum),]
+```
+
+**Answer:**
+The isoform is "Tmsb10..ENSMUST00000114050". It corresponds to the gene Tmsb10 and has 69147 counts.
+
+
+Now, we plot a summary of the data. The method `plot_assay_stats()` plot a summary with the number of genes, the number of transcripts, the distribution of isoforms and the number of genes per cell type that can be used to describe succintly the isoform distribution in the dataset.
+
+```{r plot_assay_stats, fig.height=6, fig.width=15}
+isoswitch::plot_assay_stats(seurat_obj4, "ISO")
+```
+
+**Questions:**
+Which cell type does express the largest number of genes ? 
+
+**Answer:**
+The "radial_glia" cell type expresses the largest number of genes
+
+## 1.8 Save
+
+We save the annotated and filtered Seurat object :
+
+```{r save_seurat_obj_filtered_annotated}
+out_dir <- "./output/datasets/"
+checkDir(out_dir)
+
+saveRDS(seurat_obj4, file = paste0(out_dir, "seurat_obj_annotated.rds"))
+saveRDS(color_markers, file = paste0(out_dir, "color_markers.rds"))
+```
+
+## 1.9 Ressources
+
+- [Seurat tutorials](https://satijalab.org/seurat/)
+- [Isoswitch R package](https://github.com/ucagenomix/isoswitch)
+- [Read more about Single-cell long-read](https://www.isomics.eu/index.html)
+
+# R session
+
+```{r sessioninfo, echo = FALSE, fold_output = TRUE}
+sessionInfo()
+```
+
