@@ -537,7 +537,7 @@ seurat_obj4 = Seurat::ScaleData(seurat_obj4, assay = "ISO", verbose = FALSE)
 seurat_obj4
 ```
 
-### 1.7.3 Generate a "multi" assay
+### 1.7.4 Generate a "multi" assay
 
 We generate a "multi" assay using `isoswitch` package, the method `iso_preprocess()` prepares the isoform matrix by removing low-expression transcripts as well as removing single-isoform genes which are irrelevant for the isoform switch analysis. The threshold for filtering transcripts is 5, this means that we remove the transcript if it represents less than 5% of the gene counts.
 
@@ -563,7 +563,7 @@ dim(seurat_obj4@assays$ISO@counts)
 dim(seurat_obj4@assays$multi@counts)
 ```
 
-### 1.7.3 isoform characterization
+### 1.7.5 Isoform characterization
 
 The method `iso_compute_stats()` parses the isoform raw count matrix returning a data frame with stats on the expression of each transcript
 
@@ -625,9 +625,27 @@ Which cell type does express the largest number of genes ?
 **Answer:**
 The "radial_glia" cell type expresses the largest number of genes
 
+
+### 1.7.6 Isoform switch search
+
+The term “isoform switch” refers to an event where two isoforms of the same gene are considered markers of different clusters. The marker search is implemented on the method `ISO_SWITCH_ALL()`. Any extra parameters are passed on to the underlying Seurat’s FindMarkers call to fine tune the search space. `ISO_SWITCH_ALL()` returns a data frame of transcripts identified as markers of a given cluster for a given gene, one transcript per row. 
+
+**Warnings:** This function may take time to run, so you can skip this step and you find the output here : `/shared/projects/sincellte2024/workshop_long_read_analysis/output/datasets/switch_markers_combined_all.rds`
+
+
+```{r}
+clusters <- levels(seurat_obj4@active.ident)
+
+switch_markers <- ISO_SWITCH_ALL(seurat_obj4, clusters, assay="multi", 
+                                 min.pct=0, logfc.threshold=0.40)
+
+switch_markers
+```
+
+
 ## 1.8 Save
 
-We save the annotated and filtered Seurat object :
+We save the annotated and filtered Seurat object and also the dataframe of the switch markers :
 
 ```{r save_seurat_obj_filtered_annotated}
 out_dir <- "./output/datasets/"
@@ -635,6 +653,8 @@ checkDir(out_dir)
 
 saveRDS(seurat_obj4, file = paste0(out_dir, "seurat_obj_annotated.rds"))
 saveRDS(color_markers, file = paste0(out_dir, "color_markers.rds"))
+saveRDS(switch_markers, file = paste0(out_dir, "switch_markers_combined_all.rds"))
+
 ```
 
 ## 1.9 Ressources
